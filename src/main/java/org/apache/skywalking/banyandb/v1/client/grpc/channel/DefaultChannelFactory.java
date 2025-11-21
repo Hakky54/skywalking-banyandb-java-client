@@ -101,7 +101,7 @@ public class DefaultChannelFactory implements ChannelFactory {
                 if (ZonedDateTime.ofInstant(latestCaFileAttributes.lastModifiedTime().toInstant(), ZoneOffset.UTC).isAfter(lastModifiedTimeCaFile)) {
                     X509ExtendedTrustManager trustManager = PemUtils.loadTrustMaterial(caFile);
                     TrustManagerUtils.swapTrustManager(swappableTrustManager, trustManager);
-                    log.info("SSL configuration has been refreshed");
+                    log.info("SSL configuration has been reloaded");
                 }
             } catch (IOException e) {
                 throw new UncheckedIOException(e);

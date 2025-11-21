@@ -26,14 +26,26 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.util.internal.PlatformDependent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import nl.altindag.ssl.pem.util.PemUtils;
+import nl.altindag.ssl.util.TrustManagerUtils;
 import org.apache.skywalking.banyandb.v1.client.Options;
 
-import java.io.File;
+import javax.net.ssl.X509ExtendedTrustManager;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -41,19 +53,31 @@ public class DefaultChannelFactory implements ChannelFactory {
     private final URI[] targets;
     private final Options options;
 
+    private ZonedDateTime lastModifiedTimeCaFile;
+    private X509ExtendedTrustManager swappableTrustManager;
+
     @Override
     public ManagedChannel create() throws IOException {
         NettyChannelBuilder managedChannelBuilder = NettyChannelBuilder.forAddress(resolveAddress())
                 .maxInboundMessageSize(options.getMaxInboundMessageSize())
                 .usePlaintext();
 
-        File caFile = new File(options.getSslTrustCAPath());
-        boolean isCAFileExist = caFile.exists() && caFile.isFile();
+        Path caFile = Paths.get(options.getSslTrustCAPath());
+        boolean isCAFileExist = Files.exists(caFile) && Files.isRegularFile(caFile);
         if (options.isForceTLS() || isCAFileExist) {
             SslContextBuilder builder = GrpcSslContexts.forClient();
 
             if (isCAFileExist) {
-                builder.trustManager(caFile);
+                BasicFileAttributes caFileAttributes = Files.readAttributes(caFile, BasicFileAttributes.class);
+                lastModifiedTimeCaFile = ZonedDateTime.ofInstant(caFileAttributes.lastModifiedTime().toInstant(), ZoneOffset.UTC);
+                X509ExtendedTrustManager trustManager = TrustManagerUtils.createTrustManager(PemUtils.loadCertificate(caFile));
+                swappableTrustManager = TrustManagerUtils.createSwappableTrustManager(trustManager);
+                builder.trustManager(swappableTrustManager);
+
+                Runnable sslUpdater = createSslUpdater();
+                ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
+                executorService.scheduleAtFixedRate(sslUpdater, 1, 1, TimeUnit.HOURS);
+                Runtime.getRuntime().addShutdownHook(new Thread(executorService::shutdown));
             }
             managedChannelBuilder.negotiationType(NegotiationType.TLS).sslContext(builder.build());
         }
@@ -68,4 +92,21 @@ public class DefaultChannelFactory implements ChannelFactory {
         int offset = numAddresses == 1 ? 0 : PlatformDependent.threadLocalRandom().nextInt(numAddresses);
         return new InetSocketAddress(this.targets[offset].getHost(), this.targets[offset].getPort());
     }
+
+    private Runnable createSslUpdater() {
+        return () -> {
+            try {
+                Path caFile = Paths.get(options.getSslTrustCAPath());
+                BasicFileAttributes latestCaFileAttributes = Files.readAttributes(caFile, BasicFileAttributes.class);
+                if (ZonedDateTime.ofInstant(latestCaFileAttributes.lastModifiedTime().toInstant(), ZoneOffset.UTC).isAfter(lastModifiedTimeCaFile)) {
+                    X509ExtendedTrustManager trustManager = TrustManagerUtils.createTrustManager(PemUtils.loadCertificate(caFile));
+                    TrustManagerUtils.swapTrustManager(swappableTrustManager, trustManager);
+                    log.info("SSL configuration has been refreshed");
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        };
+    }
+
 }

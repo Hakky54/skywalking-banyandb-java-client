@@ -97,10 +97,11 @@ public class DefaultChannelFactory implements ChannelFactory {
         return () -> {
             try {
                 Path caFile = Paths.get(options.getSslTrustCAPath());
-                BasicFileAttributes latestCaFileAttributes = Files.readAttributes(caFile, BasicFileAttributes.class);
-                if (ZonedDateTime.ofInstant(latestCaFileAttributes.lastModifiedTime().toInstant(), ZoneOffset.UTC).isAfter(lastModifiedTimeCaFile)) {
+                BasicFileAttributes caFileAttributes = Files.readAttributes(caFile, BasicFileAttributes.class);
+                if (ZonedDateTime.ofInstant(caFileAttributes.lastModifiedTime().toInstant(), ZoneOffset.UTC).isAfter(lastModifiedTimeCaFile)) {
                     X509ExtendedTrustManager trustManager = PemUtils.loadTrustMaterial(caFile);
                     TrustManagerUtils.swapTrustManager(swappableTrustManager, trustManager);
+                    lastModifiedTimeCaFile = ZonedDateTime.ofInstant(caFileAttributes.lastModifiedTime().toInstant(), ZoneOffset.UTC);
                     log.info("SSL configuration has been reloaded");
                 }
             } catch (IOException e) {

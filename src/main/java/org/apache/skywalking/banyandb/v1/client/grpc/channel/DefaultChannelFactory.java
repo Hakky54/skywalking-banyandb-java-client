@@ -70,7 +70,7 @@ public class DefaultChannelFactory implements ChannelFactory {
             if (isCAFileExist) {
                 BasicFileAttributes caFileAttributes = Files.readAttributes(caFile, BasicFileAttributes.class);
                 lastModifiedTimeCaFile = ZonedDateTime.ofInstant(caFileAttributes.lastModifiedTime().toInstant(), ZoneOffset.UTC);
-                X509ExtendedTrustManager trustManager = TrustManagerUtils.createTrustManager(PemUtils.loadCertificate(caFile));
+                X509ExtendedTrustManager trustManager = PemUtils.loadTrustMaterial(caFile);
                 swappableTrustManager = TrustManagerUtils.createSwappableTrustManager(trustManager);
                 builder.trustManager(swappableTrustManager);
 
@@ -99,7 +99,7 @@ public class DefaultChannelFactory implements ChannelFactory {
                 Path caFile = Paths.get(options.getSslTrustCAPath());
                 BasicFileAttributes latestCaFileAttributes = Files.readAttributes(caFile, BasicFileAttributes.class);
                 if (ZonedDateTime.ofInstant(latestCaFileAttributes.lastModifiedTime().toInstant(), ZoneOffset.UTC).isAfter(lastModifiedTimeCaFile)) {
-                    X509ExtendedTrustManager trustManager = TrustManagerUtils.createTrustManager(PemUtils.loadCertificate(caFile));
+                    X509ExtendedTrustManager trustManager = PemUtils.loadTrustMaterial(caFile);
                     TrustManagerUtils.swapTrustManager(swappableTrustManager, trustManager);
                     log.info("SSL configuration has been refreshed");
                 }
